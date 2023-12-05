@@ -69,7 +69,7 @@ GO
 
 -- Создание второй таблицы
 
-CREATE TABLE Musician (
+CREATE TABLE Musicians (
   Id INT PRIMARY KEY,
   Name NVARCHAR(50) UNIQUE NOT NULL,
   BirthDate DATE NOT NULL,
@@ -85,7 +85,7 @@ ALTER DATABASE music_service
 MODIFY FILEGROUP [PRIMARY] DEFAULT;
 GO
 
-DROP TABLE IF EXISTS Musician;
+DROP TABLE IF EXISTS Musicians;
 GO
 
 ALTER DATABASE music_service
