@@ -1,6 +1,12 @@
 USE music_service;
 GO
 
+DROP VIEW IF EXISTS UsersPlaylists;
+GO
+
+DROP TABLE IF EXISTS Playlists;
+GO
+
 DROP TABLE IF EXISTS Users;
 GO
 
