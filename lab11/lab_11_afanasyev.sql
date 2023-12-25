@@ -1,6 +1,22 @@
 USE master;
 GO
 
+/*
+1. Создать базу данных, спроектированную в рамках лабораторной работы №4, используя изученные в лабораторных работах
+5-10 средства SQL Server 2012:
+- поддержания создания и физической организации базы данных;
+- различных категорий целостности;
+- представления и индексы;
+- хранимые процедуры, функции и триггеры;
+
+2. Создание объектов базы данных должно осуществляться средствами DDL (CREATE/ALTER/DROP), в обязательном порядке
+иллюстрирующих следующие аспекты:
+- добавление и изменение полей;
+- назначение типов данных;
+- назначение ограничений целостности (PRIMARY KEY, NULL/NOT NULL/UNIQUE, CHECK и т.п.);
+- определение значений по умолчанию;
+*/
+
 DROP DATABASE IF EXISTS music_service;
 GO
 
@@ -40,13 +56,6 @@ CREATE TABLE Users
 );
 GO
 
-INSERT INTO Users (Email, Name, PasswordHash)
-VALUES
-    ('user1@gmail.com', 'user1', 'password hash'),
-    ('user2@gmail.com', 'user2', 'password hash'),
-    ('user3@gmail.com', 'user3', 'password hash');
-GO
-
 DROP TABLE IF EXISTS Playlists;
 GO
 
@@ -71,17 +80,10 @@ AFTER UPDATE
 AS
 IF UPDATE(UserId)
 BEGIN;
-    RAISERROR('Playlist''s UserId cannot be updated', 5, 1);
+    RAISERROR('Playlist''s UserId is immutable', 5, 1);
     ROLLBACK TRANSACTION;
     RETURN;
 END;
-GO
-
-INSERT INTO Playlists (UserId, Title)
-VALUES
-(1, 'playlist 1'),
-(1, 'playlist 2'),
-(2, 'playlist 1');
 GO
 
 DROP TABLE IF EXISTS Albums;
@@ -136,14 +138,14 @@ AS
 BEGIN;
     IF UPDATE(AlbumId)
     BEGIN;
-        RAISERROR('Composition''s AlbumId cannot be updated', 5, 1);
+        RAISERROR('Composition''s AlbumId is immutable', 5, 1);
         ROLLBACK TRANSACTION;
         RETURN;
     END;
 
     IF UPDATE(MusicianId)
     BEGIN;
-        RAISERROR('Composition''s MusicianId cannot be updated', 5, 1);
+        RAISERROR('Composition''s MusicianId is immutable', 5, 1);
         ROLLBACK TRANSACTION;
         RETURN;
     END;
@@ -174,7 +176,7 @@ GO
 
 CREATE VIEW AlbumsMusiciansCompositions
 AS
-SELECT TOP 100 PERCENT
+SELECT
     A.Title AS AlbumTitle,
     A.PublicationDate AS AlbumPublicationDate,
     A.Description AS AlbumDescription,
@@ -193,7 +195,6 @@ INNER JOIN Albums A
 ON C.AlbumId = A.Id
 INNER JOIN Musicians M
 ON C.MusicianId = M.Id
-ORDER BY AlbumTitle;
 GO
 
 DROP TRIGGER IF EXISTS AlbumsMusiciansCompositions_INSERT;
@@ -247,6 +248,171 @@ INSERT INTO Albums (Title, PublicationDate, Description, CoverPath)
 END;
 GO
 
+DROP TRIGGER IF EXISTS AlbumsMusiciansCompositions_UPDATE;
+GO
+
+CREATE TRIGGER AlbumsMusiciansCompositions_UPDATE
+ON AlbumsMusiciansCompositions
+INSTEAD OF UPDATE
+AS
+BEGIN;
+    IF UPDATE(AlbumTitle) OR
+       UPDATE(AlbumPublicationDate) OR
+       UPDATE(AlbumDescription) OR
+       UPDATE(AlbumCoverPath)
+    BEGIN;
+        RAISERROR('Album fields are immutable throughout the view', 5, 1);
+        RETURN;
+    END;
+
+    IF UPDATE(MusicianName) OR
+       UPDATE(MusicianBirthDate) OR
+       UPDATE(MusicianDeathDate) OR
+       UPDATE(MusicianDescription) OR
+       UPDATE(MusicianAvatarPath)
+    BEGIN;
+        RAISERROR('Musician fields are immutable throughout the view', 5, 1);
+        RETURN;
+    END;
+
+    IF UPDATE(CompositionTitle)
+    BEGIN;
+        RAISERROR('CompositionTitle field is immutable throughout the view', 5, 1);
+        RETURN;
+    END;
+
+    WITH InsertedAlbumsMusicians AS (
+        SELECT
+            A.Id AS AlbumId,
+            M.Id AS MusicianId,
+            I.CompositionTitle,
+            I.CompositionAudioPath,
+            I.CompositionDurationSeconds,
+            I.CompositionTimesPlayed
+        FROM Inserted I
+        INNER JOIN Albums A
+        ON I.AlbumTitle = A.Title
+        INNER JOIN Musicians M
+        ON I.MusicianName = M.Name
+    )
+    UPDATE C
+    SET AudioPath = IAM.CompositionAudioPath,
+        DurationSeconds = IAM.CompositionDurationSeconds,
+        TimesPlayed = IAM.CompositionTimesPlayed
+    FROM Compositions C
+    INNER JOIN InsertedAlbumsMusicians IAM
+    ON C.AlbumId = IAM.AlbumId AND
+       C.MusicianId = IAM.MusicianId AND
+       C.Title = IAM.CompositionTitle;
+END;
+GO
+
+DROP TRIGGER IF EXISTS AlbumsMusiciansCompositions_DELETE;
+GO
+
+CREATE TRIGGER AlbumsMusiciansCompositions_DELETE
+ON AlbumsMusiciansCompositions
+INSTEAD OF DELETE
+AS
+BEGIN;
+    WITH DeletedCompositions AS (
+        SELECT
+            A.Id AS AlbumId,
+            M.Id AS MusicianId,
+            D.CompositionTitle
+        FROM Deleted D
+        INNER JOIN Albums A
+        ON D.AlbumTitle = A.Title
+        INNER JOIN Musicians M
+        ON D.MusicianName = M.Name
+    )
+    DELETE FROM Compositions
+    WHERE EXISTS (
+        SELECT * FROM DeletedCompositions DC
+        WHERE Compositions.AlbumId = DC.AlbumId AND
+              Compositions.MusicianId = DC.MusicianId AND
+              Compositions.Title = DC.CompositionTitle
+    )
+END;
+GO
+
+DROP TABLE IF EXISTS PlaylistsCompositions;
+GO
+
+CREATE TABLE PlaylistsCompositions
+(
+    CompositionId INT NOT NULL REFERENCES Compositions(Id) ON DELETE CASCADE,
+    PlaylistId INT NOT NULL REFERENCES Playlists(Id) ON DELETE CASCADE,
+    PRIMARY KEY (CompositionId, PlaylistId)
+);
+GO
+
+DROP TRIGGER IF EXISTS PlaylistsCompositions_UPDATE;
+GO
+
+CREATE TRIGGER PlaylistsCompositions_UPDATE
+ON PlaylistsCompositions
+AFTER UPDATE
+AS
+BEGIN;
+    IF UPDATE(PlaylistId)
+    BEGIN;
+        RAISERROR('PlaylistsCompositions'' PlaylistId cannot be updated', 5, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    IF UPDATE(CompositionId)
+    BEGIN;
+        RAISERROR('PlaylistsCompositions'' CompositionId cannot be updated', 5, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+END;
+GO
+
+DROP FUNCTION IF EXISTS GetAlbumDuration;
+GO
+
+CREATE FUNCTION GetAlbumDuration(@AlbumTitle NVARCHAR(100))
+RETURNS INT AS
+BEGIN
+    DECLARE @Result INT = 0;
+
+    SELECT @Result = SUM(DurationSeconds)
+    FROM Compositions C
+    INNER JOIN Albums A
+    ON C.AlbumId = A.Id
+    WHERE A.Title = @AlbumTitle
+
+    RETURN @Result;
+END;
+GO
+
+/*
+3. В рассматриваемой базе данных должны быть тем или иным образом (в рамках объектов базы данных или дополнительно)
+созданы запросы DML для:
+- выборки записей (команда SELECT);
+- добавления новых записей (команда INSERT), как с помощью непосредственного указания значений, так и с помощью команды
+SELECT;
+- модификации записей (команда UPDATE);
+- удаления записей (команда DELETE);
+*/
+
+INSERT INTO Users (Email, Name, PasswordHash)
+VALUES
+    ('user1@gmail.com', 'user1', 'password hash'),
+    ('user2@gmail.com', 'user2', 'password hash'),
+    ('user3@gmail.com', 'user3', 'password hash');
+GO
+
+INSERT INTO Playlists (UserId, Title)
+VALUES
+    (1, 'playlist 1 of user1'),
+    (1, 'playlist 2 of user1'),
+    (2, 'playlist 1 of user2');
+GO
+
 -- Вставка композиции нового музыканта в новый альбом
 INSERT INTO AlbumsMusiciansCompositions (
     AlbumTitle,
@@ -264,21 +430,21 @@ INSERT INTO AlbumsMusiciansCompositions (
     CompositionTimesPlayed
 )
 VALUES
-(
-    'album1',
-    '2000-01-01',
-    'album1 description',
-    'default_cover.jpg',
-    'musician1',
-    '1960-01-01',
-    '2020-01-01',
-    'musician1 description',
-    'musician1_avatar.jpg',
-    'composition1',
-    'album1_composition1.mp3',
-    180,
-    0
-);
+    (
+        'album1',
+        '2000-01-01',
+        'album1 description',
+        'default_cover.jpg',
+        'musician1',
+        '1960-01-01',
+        '2020-01-01',
+        'musician1 description',
+        'musician1_avatar.jpg',
+        'composition1',
+        'album1_composition1.mp3',
+        180,
+        0
+    );
 GO
 
 -- Вставка композиции нового музыканта в существующий альбом
@@ -355,66 +521,12 @@ VALUES
     );
 GO
 
-SELECT * FROM AlbumsMusiciansCompositions;
-GO
-
-DROP TRIGGER IF EXISTS AlbumsMusiciansCompositions_UPDATE;
-GO
-
-CREATE TRIGGER AlbumsMusiciansCompositions_UPDATE
-ON AlbumsMusiciansCompositions
-INSTEAD OF UPDATE
-AS
-BEGIN;
-    IF UPDATE(AlbumTitle) OR
-       UPDATE(AlbumPublicationDate) OR
-       UPDATE(AlbumDescription) OR
-       UPDATE(AlbumCoverPath)
-    BEGIN;
-        RAISERROR('Album fields cannot be updated', 5, 1);
-        RETURN;
-    END;
-
-    IF UPDATE(MusicianName) OR
-       UPDATE(MusicianBirthDate) OR
-       UPDATE(MusicianDeathDate) OR
-       UPDATE(MusicianDescription) OR
-       UPDATE(MusicianAvatarPath)
-    BEGIN;
-        RAISERROR('Musician fields cannot be updated', 5, 1);
-        RETURN;
-    END;
-
-    IF UPDATE(CompositionTitle)
-    BEGIN;
-        RAISERROR('CompositionTitle field cannot be updated', 5, 1);
-        RETURN;
-    END;
-
-    WITH InsertedAlbumsMusicians AS (
-        SELECT
-            A.Id AS AlbumId,
-            M.Id AS MusicianId,
-            I.CompositionTitle,
-            I.CompositionAudioPath,
-            I.CompositionDurationSeconds,
-            I.CompositionTimesPlayed
-        FROM Inserted I
-        INNER JOIN Albums A
-        ON I.AlbumTitle = A.Title
-        INNER JOIN Musicians M
-        ON I.MusicianName = M.Name
-    )
-    UPDATE C
-    SET AudioPath = IAM.CompositionAudioPath,
-        DurationSeconds = IAM.CompositionDurationSeconds,
-        TimesPlayed = IAM.CompositionTimesPlayed
-    FROM Compositions C
-    INNER JOIN InsertedAlbumsMusicians IAM
-    ON C.AlbumId = IAM.AlbumId AND
-       C.MusicianId = IAM.MusicianId AND
-       C.Title = IAM.CompositionTitle;
-END;
+INSERT INTO PlaylistsCompositions (CompositionId, PlaylistId)
+VALUES
+    (1, 1),
+    (2, 1),
+    (3, 1),
+    (4, 2);
 GO
 
 -- Обновление неключевого атрибута Compositions
@@ -423,86 +535,141 @@ SET CompositionTimesPlayed = CompositionTimesPlayed + 5
 WHERE AlbumTitle = 'album2';
 GO
 
-SELECT * FROM AlbumsMusiciansCompositions
+-- 4. Запросы, созданные в рамках пп.2,3 должны иллюстрировать следующие возможности языка:
 
-DROP TRIGGER IF EXISTS AlbumsMusiciansCompositions_DELETE;
+-- удаление повторяющихся записей (DISTINCT);
+
+SELECT COUNT(DISTINCT AlbumTitle)
+FROM AlbumsMusiciansCompositions;
 GO
 
-CREATE TRIGGER AlbumsMusiciansCompositions_DELETE
-ON AlbumsMusiciansCompositions
-INSTEAD OF DELETE
-AS
-BEGIN;
-    WITH DeletedCompositions AS (
-        SELECT
-            A.Id AS AlbumId,
-            M.Id AS MusicianId,
-            D.CompositionTitle
-        FROM Deleted D
-        INNER JOIN Albums A
-        ON D.AlbumTitle = A.Title
-        INNER JOIN Musicians M
-        ON D.MusicianName = M.Name
-    )
-    DELETE FROM Compositions
-    WHERE EXISTS (
-        SELECT * FROM DeletedCompositions DC
-        WHERE Compositions.AlbumId = DC.AlbumId AND
-              Compositions.MusicianId = DC.MusicianId AND
-              Compositions.Title = DC.CompositionTitle
-    )
-END;
+-- выбор, упорядочивание и именование полей (создание псевдонимов для полей и таблиц / представлений);
+
+SELECT
+    Title AS AlbumTitle,
+    dbo.GetAlbumDuration(Title) AS AlbumDuration,
+    Description AS AlbumDescription
+FROM Albums;
+GO
+
+-- соединение таблиц (INNER JOIN / LEFT JOIN / RIGHT JOIN / FULL OUTER JOIN);
+
+SELECT PC.CompositionId, P.Title
+FROM PlaylistsCompositions PC
+RIGHT JOIN Playlists P
+ON PC.PlaylistId = P.Id;
+GO
+
+-- условия выбора записей (в том числе, условия / LIKE / BETWEEN / IN / EXISTS);
+
+-- альбомы с префиксом album:
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumTitle LIKE 'album%';
+GO
+
+-- композиции продолжительностью от 140 до 150 секунд:
+SELECT CompositionTitle
+FROM AlbumsMusiciansCompositions
+WHERE CompositionDurationSeconds BETWEEN 140 AND 150;
+GO
+
+-- непустые плейлисты:
+SELECT Title
+FROM Playlists
+WHERE Id IN (
+    SELECT DISTINCT PlaylistId
+    FROM PlaylistsCompositions
+);
+GO
+
+-- пользователи без плейлистов:
+SELECT Name
+FROM Users U
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM Playlists P
+    WHERE U.Id = P.UserId
+);
+GO
+
+-- сортировка записей (ORDER BY - ASC, DESC);
+
+-- альбомы по лексикографическому убыванию названия:
+SELECT * FROM AlbumsMusiciansCompositions
+ORDER BY AlbumTitle DESC;
+GO
+
+-- группировка записей (GROUP BY + HAVING, использование функций агрегирования COUNT / AVG / SUM / MIN / MAX);
+
+-- плейлисты с числом композиций в возрастающем порядке:
+SELECT
+    UserId,
+    Title,
+    COUNT(PC.CompositionId) AS CompositionsCount
+FROM Playlists
+LEFT JOIN PlaylistsCompositions PC
+ON Id = PlaylistId
+GROUP BY UserId, Title
+ORDER BY CompositionsCount;
+GO
+
+-- альбомы со средней продолжительностью композиции более 150 секунд:
+SELECT
+    AlbumTitle,
+    AVG(CompositionDurationSeconds) AS AlbumAverageDuration
+FROM AlbumsMusiciansCompositions
+GROUP BY AlbumTitle
+HAVING AVG(CompositionDurationSeconds) >= 150;
+GO
+
+-- объединение результатов нескольких запросов (UNION / UNION ALL / EXCEPT / INTERSECT);
+
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumDescription IS NULL
+UNION
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumCoverPath = 'default_cover.jpg';
+GO
+
+-- без удаления повторяющихся записей:
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumDescription IS NULL
+UNION ALL
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumCoverPath = 'default_cover.jpg';
+GO
+
+-- пересечение пусто:
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumDescription IS NULL
+INTERSECT
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumCoverPath = 'default_cover.jpg';
+GO
+
+-- результаты первой выборки без результатов второй:
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumDescription IS NULL
+EXCEPT
+SELECT AlbumTitle
+FROM AlbumsMusiciansCompositions
+WHERE AlbumCoverPath = 'default_cover.jpg';
 GO
 
 -- Удаление композиций в разных альбомах
 DELETE FROM AlbumsMusiciansCompositions
-WHERE CompositionDurationSeconds >= 140 AND
-      CompositionDurationSeconds < 160;
+WHERE CompositionDurationSeconds BETWEEN 140 AND 150;
 GO
 
--- При удалении последней композиции в альбоме удаляется и сам альбом
+-- При удалении последней композиции альбома удаляется и сам альбом
 DELETE FROM AlbumsMusiciansCompositions
 WHERE CompositionAudioPath = 'album2_composition1.mp3';
 GO
-
-SELECT * FROM AlbumsMusiciansCompositions;
-GO
-
-SELECT * FROM Albums;
-
-DROP TABLE IF EXISTS PlaylistsCompositions;
-GO
-
-CREATE TABLE PlaylistsCompositions
-(
-    CompositionId INT NOT NULL REFERENCES Compositions(Id) ON DELETE CASCADE,
-    PlaylistId INT NOT NULL REFERENCES Playlists(Id) ON DELETE CASCADE,
-    PRIMARY KEY (CompositionId, PlaylistId)
-);
-GO
-
-DROP TRIGGER IF EXISTS PlaylistsCompositions_UPDATE;
-GO
-
-CREATE TRIGGER PlaylistsCompositions_UPDATE
-ON PlaylistsCompositions
-AFTER UPDATE
-AS
-BEGIN;
-    IF UPDATE(PlaylistId)
-    BEGIN;
-        RAISERROR('PlaylistsCompositions'' PlaylistId cannot be updated', 5, 1);
-        ROLLBACK TRANSACTION;
-        RETURN;
-    END;
-
-    IF UPDATE(CompositionId)
-    BEGIN;
-        RAISERROR('PlaylistsCompositions'' CompositionId cannot be updated', 5, 1);
-        ROLLBACK TRANSACTION;
-        RETURN;
-    END;
-END;
-GO
-
--- TODO: functions, procedures, complex queries
