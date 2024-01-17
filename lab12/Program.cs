@@ -25,12 +25,15 @@ namespace Lab12
         {
           SqlCommand command = new SqlCommand(
               "INSERT INTO Users (Email, Name, PasswordHash) " +
-              "VALUES (@Email, @Name, @PasswordHash)", connection);
+              "VALUES (@Email, @Name, @PasswordHash); " +
+              "SELECT SCOPE_IDENTITY()", connection);
           command.Parameters.Add(new SqlParameter("@Email", "user3@gmail.com"));
           command.Parameters.Add(new SqlParameter("@Name", "user3"));
           command.Parameters.Add(new SqlParameter("@PasswordHash", "hash"));
 
-          command.ExecuteNonQuery();
+          object result = command.ExecuteScalar();
+          
+          Console.WriteLine($"Id добавленного объекта: {result}");
         }
 
         // Обновление данных таблицы
@@ -85,13 +88,19 @@ namespace Lab12
           
           adapter.InsertCommand = new SqlCommand(
               "INSERT Users (Email, Name, PasswordHash) " +
-              "VALUES (@Email, @Name, @PasswordHash)", connection);
+              "VALUES (@Email, @Name, @PasswordHash); " +
+              "SET @Id = SCOPE_IDENTITY()", connection);
           adapter.InsertCommand.Parameters.Add(
               "@Email", SqlDbType.NVarChar, 320, "Email");
           adapter.InsertCommand.Parameters.Add(
               "@Name", SqlDbType.NVarChar, 50, "Name");
           adapter.InsertCommand.Parameters.Add(
               "@PasswordHash", SqlDbType.NVarChar, 100, "PasswordHash");
+          SqlParameter idParameter = adapter.InsertCommand.Parameters.Add(
+              "@Id", SqlDbType.Int);
+          idParameter.Direction = ParameterDirection.Output;
+
+          // TODO: fix with SourceColumn?
 
           adapter.UpdateCommand = new SqlCommand(
               "UPDATE Users SET BirthDate = @BirthDate WHERE Id = @Id",
@@ -128,6 +137,8 @@ namespace Lab12
           usersTable.Rows[1].Delete();
 
           adapter.Update(usersTable);
+
+          Console.WriteLine($"Id добавленного объекта: {idParameter.Value}");
 
           // Просмотр содержимого таблицы
           using (DataTableReader reader = usersTable.CreateDataReader())
