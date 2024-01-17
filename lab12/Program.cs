@@ -81,6 +81,8 @@ namespace Lab12
         using (SqlDataAdapter adapter = new SqlDataAdapter(
             "SELECT * FROM Users", connection))
         {
+          adapter.MissingSchemaAction = MissingSchemaAction.AddWithKey;
+          
           adapter.InsertCommand = new SqlCommand(
               "INSERT Users (Email, Name, PasswordHash) " +
               "VALUES (@Email, @Name, @PasswordHash)", connection);
@@ -114,6 +116,8 @@ namespace Lab12
           newRow["Email"] = "user3@gmail.com";
           newRow["Name"] = "user3";
           newRow["PasswordHash"] = "hash";
+          newRow["BirthDate"] = "2006-01-17";
+          newRow["AvatarPath"] = "default_avatar.jpg";
           usersTable.Rows.Add(newRow);
 
           // Обновление данных
@@ -124,9 +128,6 @@ namespace Lab12
           usersTable.Rows[1].Delete();
 
           adapter.Update(usersTable);
-
-          usersTable.Clear();
-          adapter.Fill(usersTable);
 
           // Просмотр содержимого таблицы
           using (DataTableReader reader = usersTable.CreateDataReader())
